@@ -1,0 +1,16 @@
+{
+  "name": "pedia-ai-agent",
+  "version": "2.0.0",
+  "description": "PEDIA AI AGENT - WhatsApp AI Agent for Android Termux",
+  "main": "wa_bridge.js",
+  "scripts": {
+    "start": "node wa_bridge.js"
+  },
+  "dependencies": {
+    "whatsapp-web.js": "^1.26.0",
+    "qrcode-terminal": "^0.12.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

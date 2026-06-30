@@ -1,25 +1,20 @@
 """
-main.py — Entry point PEDIA AI AGENT
+main.py — Entry point PEDIA AI AGENT v2.0 (WhatsApp Edition)
 """
 import sys
-import os
 import logging
 from pathlib import Path
 
-# Setup logging
 LOG_FORMAT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 logging.basicConfig(
     level=logging.INFO,
     format=LOG_FORMAT,
-    handlers=[
-        logging.StreamHandler(sys.stdout),
-    ]
+    handlers=[logging.StreamHandler(sys.stdout)],
 )
 logger = logging.getLogger("pedia-agent")
 
 
 def setup_log_file():
-    """Add file handler setelah config loaded."""
     from jarvis.config import LOG_PATH
     LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
     fh = logging.FileHandler(str(LOG_PATH))
@@ -28,51 +23,70 @@ def setup_log_file():
 
 
 def main():
-    print("=" * 50)
-    print("  PEDIA AI AGENT")
-    print("  Android 11 · Termux · armeabi-v7a")
-    print("=" * 50)
+    print("")
+    print("══════════════════════════════════════════")
+    print("  PEDIA AI AGENT v2.0")
+    print("  WhatsApp AI Agent · Android Termux")
+    print("══════════════════════════════════════════")
 
-    # Validasi config
-    from jarvis.config import validate, AGENT_NAME
+    from jarvis.config import validate, AGENT_NAME, GEMINI_API_KEY, CEREBRAS_API_KEY, GROQ_API_KEY
     if not validate():
-        print("\n❌ Konfigurasi tidak lengkap. Edit file .env terlebih dahulu.")
+        print("\n❌ Set minimal satu API key di .env")
         sys.exit(1)
 
     setup_log_file()
 
-    # Init database
     from jarvis import memory
     memory.init_db()
     logger.info("Database initialized.")
 
-    # Run mode
-    if len(sys.argv) > 1 and sys.argv[1] == "--cli":
+    # Tampilkan provider yang aktif
+    providers = []
+    if GEMINI_API_KEY:   providers.append("Gemini ✅")
+    if CEREBRAS_API_KEY: providers.append("Cerebras ✅")
+    if GROQ_API_KEY:     providers.append("Groq ✅")
+    print("  AI Providers: " + " → ".join(providers))
+    print("")
+
+    if "--cli" in sys.argv:
         run_cli_mode()
     else:
-        run_telegram_mode()
+        run_whatsapp_mode()
 
 
-def run_telegram_mode():
-    """Mode default: Telegram Bot."""
-    logger.info("Starting in Telegram Bot mode...")
-    from jarvis.telegram import run_bot
+def run_whatsapp_mode():
+    print("  Mode: WhatsApp Bot")
+    print("  Memulai wa_bridge.js...")
+    print("  Scan QR Code yang muncul untuk login WhatsApp.")
+    print("  Session tersimpan permanen — tidak perlu scan ulang setelah restart.")
+    print("")
+
+    from jarvis.whatsapp import WhatsAppAgent
+    agent = WhatsAppAgent()
+    
     try:
-        run_bot()
+        agent.start()
+        print("")
+        print("  ✅ WhatsApp connected! AI Agent aktif.")
+        print("  Tekan Ctrl+C untuk berhenti.")
+        print("")
+        agent.wait()
     except KeyboardInterrupt:
-        logger.info("Bot dihentikan.")
+        print("\n  Menghentikan agent...")
+        agent.stop()
+        print("  Sampai jumpa!")
     except Exception as e:
         logger.exception("Fatal error: %s", e)
         sys.exit(1)
 
 
 def run_cli_mode():
-    """Mode CLI untuk testing langsung di terminal."""
     from jarvis.ai import chat
     from jarvis.config import AGENT_NAME
 
     TEST_USER = "cli-user"
-    print(f"\n{AGENT_NAME} CLI Mode — ketik 'quit' untuk keluar\n")
+    print("  Mode: CLI Testing")
+    print("  Ketik 'quit' untuk keluar.\n")
 
     while True:
         try:
@@ -87,12 +101,14 @@ def run_cli_mode():
             print("Sampai jumpa!")
             break
 
-        print(f"\n{AGENT_NAME}: ", end="", flush=True)
+        print(AGENT_NAME + ": ", end="", flush=True)
         try:
-            response = chat(TEST_USER, user_input)
+            response = chat(TEST_USER, user_input,
+                           sender_phone=TEST_USER,
+                           sender_name="Tester")
             print(response)
         except Exception as e:
-            print(f"Error: {e}")
+            print("Error: " + str(e))
         print()
 
 

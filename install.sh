@@ -1,80 +1,114 @@
 #!/data/data/com.termux/files/usr/bin/bash
 # ============================================================
-# PEDIA AI AGENT — install.sh
-# Target: Android 11, Termux, armeabi-v7a (32-bit)
+# PEDIA AI AGENT v2.0 — install.sh
+# Target: Android 11, Termux, Realme C30, armeabi-v7a (32-bit)
 # ============================================================
 
 set -e
 
 echo ""
-echo "=========================================="
-echo "  PEDIA AI AGENT — Installer"
-echo "  Android Termux Setup"
-echo "=========================================="
+echo "══════════════════════════════════════════"
+echo "  PEDIA AI AGENT v2.0"
+echo "  WhatsApp AI Agent — Installer"
+echo "══════════════════════════════════════════"
 echo ""
 
-# ── Step 1: Update packages ──────────────────────────────────
-echo "[1/6] Update package list..."
+# ── Step 1: Update ───────────────────────────────────────────
+echo "[1/7] Update package list..."
 pkg update -y 2>/dev/null || true
+pkg upgrade -y 2>/dev/null || true
 
-# ── Step 2: Install system packages ──────────────────────────
-echo "[2/6] Install sistem dependencies..."
+# ── Step 2: System packages ──────────────────────────────────
+echo "[2/7] Install system packages..."
 pkg install -y \
     python \
+    nodejs \
     git \
     termux-api \
     ffmpeg \
+    chromium \
     openssl \
     libffi \
-    libsqlite \
-    clang \
-    make \
     2>/dev/null || true
 
-# Optional: mpv untuk playback audio
-echo "      Install mpv (opsional, untuk playback audio)..."
-pkg install -y mpv 2>/dev/null || echo "      [skip] mpv tidak tersedia di repo ini"
+# Set CHROME_PATH untuk whatsapp-web.js
+CHROME_BIN=$(which chromium 2>/dev/null || which chromium-browser 2>/dev/null || echo "")
+if [ -n "$CHROME_BIN" ]; then
+    echo "  ✅ Chromium: $CHROME_BIN"
+    export CHROME_PATH="$CHROME_BIN"
+fi
 
-# ── Step 3: Upgrade pip ───────────────────────────────────────
-echo "[3/6] Upgrade pip..."
+# Optional: mpv untuk audio
+echo "      Install mpv (opsional)..."
+pkg install -y mpv 2>/dev/null || true
+
+# ── Step 3: Node.js dependencies ─────────────────────────────
+echo "[3/7] Install Node.js packages (whatsapp-web.js)..."
+npm install --prefer-offline 2>/dev/null || npm install
+
+# ── Step 4: Puppeteer config untuk Android ───────────────────
+echo "[4/7] Configure Puppeteer untuk Android Termux..."
+export PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+
+# Cek ulang chrome path
+CHROME=$(which chromium 2>/dev/null \
+    || which chromium-browser 2>/dev/null \
+    || ls /data/data/com.termux/files/usr/bin/chromium* 2>/dev/null | head -1 \
+    || echo "")
+
+if [ -n "$CHROME" ]; then
+    echo "  Chrome: $CHROME"
+    # Simpan ke .env agar start.sh bisa baca
+    if ! grep -q "CHROME_PATH" .env 2>/dev/null; then
+        echo "" >> .env 2>/dev/null || true
+        echo "CHROME_PATH=$CHROME" >> .env 2>/dev/null || true
+    fi
+fi
+
+# ── Step 5: Python packages ───────────────────────────────────
+echo "[5/7] Install Python packages..."
 pip install --upgrade pip 2>/dev/null || true
-
-# ── Step 4: Install Python dependencies ──────────────────────
-echo "[4/6] Install Python packages..."
 pip install -r requirements.txt
 
-# ── Step 5: Install yt-dlp (opsional) ────────────────────────
-echo "[5/6] Install yt-dlp (untuk download audio YouTube)..."
-pip install yt-dlp 2>/dev/null || echo "      [skip] yt-dlp gagal install"
+# Optional: yt-dlp
+echo "      Install yt-dlp (opsional, untuk download audio)..."
+pip install yt-dlp 2>/dev/null || echo "      [skip] yt-dlp gagal"
 
-# ── Step 6: Setup .env ───────────────────────────────────────
-echo "[6/6] Setup konfigurasi..."
+# ── Step 6: Setup directories ─────────────────────────────────
+echo "[6/7] Setup direktori..."
+mkdir -p data
+mkdir -p data/wa_session
+
+# ── Step 7: Setup .env ───────────────────────────────────────
+echo "[7/7] Setup konfigurasi..."
 if [ ! -f ".env" ]; then
     cp .env.example .env
     echo ""
     echo "  ✅ File .env dibuat dari .env.example"
-    echo "  ⚠️  WAJIB edit .env dan isi API key sebelum menjalankan!"
+    if [ -n "$CHROME" ]; then
+        echo "CHROME_PATH=$CHROME" >> .env
+    fi
     echo ""
-    echo "  Edit dengan: nano .env"
-    echo ""
+    echo "  ⚠️  WAJIB edit .env sebelum menjalankan!"
+    echo "  nano .env"
 else
-    echo "  .env sudah ada, skip."
+    echo "  .env sudah ada."
 fi
-
-# Buat direktori data
-mkdir -p data
 
 # ── Done ──────────────────────────────────────────────────────
 echo ""
-echo "=========================================="
+echo "══════════════════════════════════════════"
 echo "  ✅ Instalasi selesai!"
 echo ""
 echo "  Langkah selanjutnya:"
-echo "  1. Edit .env: nano .env"
-echo "  2. Isi GEMINI_API_KEY dan TELEGRAM_TOKEN"
-echo "  3. Jalankan: bash start.sh"
+echo "  1. Edit .env  →  nano .env"
+echo "  2. Isi minimal satu API key:"
+echo "     GEMINI_API_KEY   → https://aistudio.google.com/app/apikey"
+echo "     CEREBRAS_API_KEY → https://cloud.cerebras.ai"
+echo "     GROQ_API_KEY     → https://console.groq.com"
+echo "  3. Jalankan  →  bash start.sh"
 echo ""
-echo "  Untuk mode CLI (test tanpa Telegram):"
-echo "  bash start.sh --cli"
-echo "=========================================="
+echo "  QR Code akan muncul otomatis untuk login WhatsApp."
+echo "  Session disimpan permanen setelah scan."
+echo "══════════════════════════════════════════"
 echo ""

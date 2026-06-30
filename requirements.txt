@@ -1,15 +1,5 @@
-# PEDIA AI AGENT — requirements.txt
-# Semua library compatible dengan Python 3.13 + Android armeabi-v7a (32-bit)
+# PEDIA AI AGENT v2.0 — Python dependencies
+# Compatible: Python 3.13 + Android armeabi-v7a (32-bit)
 
-# Core
 requests==2.32.3
 python-dotenv==1.0.1
-
-# Telegram Bot
-python-telegram-bot==21.6
-
-# Data (tanpa C-extension berat, murni Python)
-# SQLite built-in di Python — tidak perlu install tambahan
-
-# Optional: Download audio YouTube
-# yt-dlp  # Install manual: pip install yt-dlp
