@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Analytics{% endblock %}
+{% block content %}
+<div class="stats-grid">
+  <div class="stat-card"><div class="stat-value">{{ analytics.total_messages }}</div><div class="stat-label">Total Pesan</div></div>
+  <div class="stat-card"><div class="stat-value">{{ analytics.total_users }}</div><div class="stat-label">Users</div></div>
+  <div class="stat-card"><div class="stat-value">{{ analytics.total_groups }}</div><div class="stat-label">Grup</div></div>
+  <div class="stat-card"><div class="stat-value">{{ analytics.avg_response_ms }}ms</div><div class="stat-label">Avg Response</div></div>
+  <div class="stat-card"><div class="stat-value" style="color:#e74c3c">{{ analytics.error_count }}</div><div class="stat-label">Errors</div></div>
+  <div class="stat-card"><div class="stat-value" style="color:#f1c40f">{{ analytics.fallback_count }}</div><div class="stat-label">Fallbacks</div></div>
+</div>
+<div class="card">
+  <div class="card-title">Penggunaan per Provider</div>
+  {% for p in analytics.by_provider %}
+  <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #1f1f1f">
+    <span>{{ p.provider }}</span>
+    <span style="color:#25d366;font-weight:600">{{ p.c }} requests</span>
+  </div>
+  {% endfor %}
+</div>
+<div class="card">
+  <div class="card-title">Recent Logs</div>
+  <table class="table">
+    <tr><th>Waktu</th><th>Context</th><th>Provider</th><th>Ms</th><th>Fallback</th><th>Status</th></tr>
+    {% for log in logs %}
+    <tr>
+      <td class="text-muted">{{ log.ts[:16] if log.ts else '-' }}</td>
+      <td class="text-muted">{{ (log.context_id or '')[:20] }}</td>
+      <td>{{ log.provider or '-' }}</td>
+      <td>{{ log.response_ms }}</td>
+      <td>{% if log.fallback_used %}<span class="badge badge-yellow">Ya</span>{% else %}-{% endif %}</td>
+      <td>{% if log.error %}<span class="badge badge-red">ERR</span>{% else %}<span class="badge badge-green">OK</span>{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+{% endblock %}

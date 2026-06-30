@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Chats{% endblock %}
+{% block content %}
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+<div class="card">
+  <div class="card-title">Chat Pribadi</div>
+  {% if users %}
+  <table class="table">
+    <tr><th>User</th><th>Pesan</th><th>Aksi</th></tr>
+    {% for u in users %}
+    <tr>
+      <td>{{ u.name or u.phone }}</td>
+      <td>{{ u.msg_count }}</td>
+      <td>
+        <a href="/chats/history?context_id={{ u.phone }}&session_id={{ current_session }}" class="btn btn-secondary btn-sm">👁️ Lihat</a>
+        <a href="/chats/export?context_id={{ u.phone }}&session_id={{ current_session }}" class="btn btn-secondary btn-sm">⬇️ Export</a>
+        <form method="POST" action="/chats/clear" style="display:inline">
+          <input type="hidden" name="context_id" value="{{ u.phone }}">
+          <input type="hidden" name="session_id" value="{{ current_session }}">
+          <button class="btn btn-danger btn-sm" onclick="return confirm('Hapus?')">🗑️</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}<p class="text-muted">Belum ada chat.</p>{% endif %}
+</div>
+<div class="card">
+  <div class="card-title">Grup</div>
+  {% if groups %}
+  <table class="table">
+    <tr><th>Grup</th><th>AI</th><th>Aksi</th></tr>
+    {% for g in groups %}
+    <tr>
+      <td>{{ g.group_name or g.group_id[:20] }}</td>
+      <td>{% if g.ai_enabled and not g.ai_paused %}<span class="badge badge-green">ON</span>{% else %}<span class="badge badge-red">OFF</span>{% endif %}</td>
+      <td>
+        <a href="/chats/history?context_id={{ g.group_id }}&session_id={{ current_session }}" class="btn btn-secondary btn-sm">👁️ Lihat</a>
+        <a href="/chats/export?context_id={{ g.group_id }}&session_id={{ current_session }}" class="btn btn-secondary btn-sm">⬇️ Export</a>
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}<p class="text-muted">Belum ada grup.</p>{% endif %}
+</div>
+</div>
+{% endblock %}

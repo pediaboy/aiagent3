@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Logs{% endblock %}
+{% block content %}
+<div class="card">
+  <div class="card-title">AI Logs</div>
+  <table class="table">
+    <tr><th>Waktu</th><th>Sender</th><th>Prompt</th><th>Provider</th><th>Ms</th><th>Status</th></tr>
+    {% for log in logs %}
+    <tr>
+      <td class="text-muted" style="white-space:nowrap">{{ log.ts[:16] if log.ts else '-' }}</td>
+      <td>{{ log.sender_name or log.sender_phone or '-' }}</td>
+      <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{ log.prompt }}">{{ (log.prompt or '')[:60] }}</td>
+      <td>{{ log.provider or '-' }}</td>
+      <td>{{ log.response_ms }}</td>
+      <td>{% if log.error %}<span class="badge badge-red" title="{{ log.error }}">ERR</span>{% else %}<span class="badge badge-green">OK</span>{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+{% endblock %}

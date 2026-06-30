@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% block title %}Groups{% endblock %}
+{% block content %}
+<div class="card">
+  <div class="card-title">Kelola Grup WhatsApp</div>
+  <p class="text-muted" style="margin-bottom:16px">Aktifkan/nonaktifkan AI, ganti personality, dan reset memory grup dari sini.</p>
+  {% if groups %}
+  <table class="table">
+    <tr><th>Nama Grup</th><th>AI</th><th>Status</th><th>Provider</th><th>Personality</th><th>Aksi</th></tr>
+    {% for g in groups %}
+    <tr>
+      <td>
+        <div>{{ g.group_name or g.group_id }}</div>
+        <div class="text-muted">{{ g.group_id[:30] }}...</div>
+      </td>
+      <td>
+        {% if g.ai_enabled and not g.ai_paused %}
+          <span class="badge badge-green">Aktif</span>
+        {% elif g.ai_paused %}
+          <span class="badge badge-yellow">Dijeda</span>
+        {% else %}
+          <span class="badge badge-red">Nonaktif</span>
+        {% endif %}
+      </td>
+      <td>{{ g.updated_at[:10] if g.updated_at else '-' }}</td>
+      <td>{{ g.provider or 'auto' }}</td>
+      <td>{{ g.personality or 'default' }}</td>
+      <td>
+        <button onclick="openModal('{{ g.group_id }}','{{ g.group_name or g.group_id }}',{{ g.ai_enabled }},{{ g.ai_paused }}, '{{ g.provider or 'auto' }}','{{ g.personality or 'default' }}')"
+          class="btn btn-secondary btn-sm">⚙️ Kelola</button>
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+    <p class="text-muted">Belum ada grup. Grup akan muncul otomatis saat AI menerima pesan dari grup.</p>
+  {% endif %}
+</div>
+
+<div id="modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:100;align-items:center;justify-content:center">
+  <div style="background:#1a1a1a;border:1px solid #2a2a2a;border-radius:12px;padding:28px;width:440px;max-width:95vw">
+    <h3 style="margin-bottom:16px" id="modal-title">Kelola Grup</h3>
+    <form method="POST" action="/groups/update">
+      <input type="hidden" name="group_id" id="m-group-id">
+      <input type="hidden" name="session_id" value="{{ current_session }}">
+      <div class="form-group">
+        <label class="form-label">AI Enabled</label>
+        <select name="ai_enabled" class="form-select" id="m-enabled">
+          <option value="1">✅ Aktif</option>
+          <option value="0">❌ Nonaktif</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">AI Status</label>
+        <select name="ai_paused" class="form-select" id="m-paused">
+          <option value="0">▶️ Running</option>
+          <option value="1">⏸️ Dijeda</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Provider</label>
+        <select name="provider" class="form-select" id="m-provider">
+          <option value="auto">🔄 Auto (Gemini → Cerebras → Groq)</option>
+          <option value="gemini">⚡ Gemini</option>
+          <option value="cerebras">🧠 Cerebras</option>
+          <option value="groq">🚀 Groq</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Personality</label>
+        <select name="personality" class="form-select" id="m-personality">
+          {% for p in personalities %}
+          <option value="{{ p.name }}">{{ p.display }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:16px">
+        <button type="submit" class="btn btn-primary">Simpan</button>
+        <button type="button" onclick="closeModal()" class="btn btn-secondary">Batal</button>
+      </div>
+    </form>
+    <hr style="border-color:#2a2a2a;margin:16px 0">
+    <form method="POST" action="/groups/reset_memory" style="display:inline">
+      <input type="hidden" name="group_id" id="mr-group-id">
+      <input type="hidden" name="session_id" value="{{ current_session }}">
+      <button type="submit" class="btn btn-warning btn-sm" onclick="return confirm('Reset memory?')">🧠 Reset Memory</button>
+    </form>
+    <form method="POST" action="/groups/clear_history" style="display:inline;margin-left:8px">
+      <input type="hidden" name="group_id" id="ch-group-id">
+      <input type="hidden" name="session_id" value="{{ current_session }}">
+      <button type="submit" class="btn btn-danger btn-sm" onclick="return confirm('Hapus history?')">🗑️ Clear History</button>
+    </form>
+  </div>
+</div>
+
+<script>
+function openModal(gid, gname, enabled, paused, provider, personality) {
+  document.getElementById('modal-title').textContent = 'Kelola: ' + gname;
+  document.getElementById('m-group-id').value = gid;
+  document.getElementById('mr-group-id').value = gid;
+  document.getElementById('ch-group-id').value = gid;
+  document.getElementById('m-enabled').value = enabled;
+  document.getElementById('m-paused').value = paused;
+  document.getElementById('m-provider').value = provider;
+  document.getElementById('m-personality').value = personality;
+  document.getElementById('modal').style.display = 'flex';
+}
+function closeModal() { document.getElementById('modal').style.display = 'none'; }
+</script>
+{% endblock %}

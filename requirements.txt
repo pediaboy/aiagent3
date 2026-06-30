@@ -1,5 +1,6 @@
-# PEDIA AI AGENT v2.0 — Python dependencies
-# Compatible: Python 3.13 + Android armeabi-v7a (32-bit)
+# PEDIA AI AGENT v3.0 — Python requirements
+# Compatible: Python 3.13, Android armeabi-v7a (32-bit)
 
 requests==2.32.3
 python-dotenv==1.0.1
+flask==3.0.3

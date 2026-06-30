@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Android Tools{% endblock %}
+{% block content %}
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+<div class="card">
+  <div class="card-title">Available Tools ({{ tools|length }})</div>
+  {% for t in tools %}
+  <div style="border-bottom:1px solid #1f1f1f;padding:10px 0;cursor:pointer" onclick="selectTool('{{ t.name }}','{{ t.description[:60] }}')">
+    <div style="font-weight:600;font-size:13px">{{ t.name }}</div>
+    <div class="text-muted">{{ t.description[:80] }}</div>
+  </div>
+  {% endfor %}
+</div>
+<div class="card">
+  <div class="card-title">Test Tool</div>
+  <div class="form-group">
+    <label class="form-label">Tool Name</label>
+    <input class="form-control" id="tool-name" placeholder="Pilih dari kiri atau ketik">
+  </div>
+  <div class="form-group">
+    <label class="form-label">Arguments (JSON)</label>
+    <textarea class="form-control" id="tool-args" rows="4">{}</textarea>
+  </div>
+  <button class="btn btn-primary" onclick="runTool()">▶️ Run Tool</button>
+  <div id="tool-result" style="margin-top:16px;background:#111;border-radius:6px;padding:12px;font-family:monospace;font-size:12px;display:none;white-space:pre-wrap"></div>
+</div>
+</div>
+<script>
+function selectTool(name, desc) {
+  document.getElementById('tool-name').value = name;
+}
+function runTool() {
+  const name = document.getElementById('tool-name').value;
+  const args = document.getElementById('tool-args').value;
+  const res  = document.getElementById('tool-result');
+  res.style.display='block'; res.textContent='Running...';
+  const fd = new FormData();
+  fd.append('tool_name', name);
+  fd.append('args', args);
+  fetch('/tools/run', {method:'POST',body:fd})
+    .then(r=>r.json()).then(d=>{ res.textContent = d.result || JSON.stringify(d,null,2); })
+    .catch(e=>{ res.textContent='Error: '+e; });
+}
+</script>
+{% endblock %}

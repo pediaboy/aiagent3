@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}Personalities{% endblock %}
+{% block content %}
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+<div class="card">
+  <div class="card-title">Daftar Personality</div>
+  {% for p in personalities %}
+  <div style="border-bottom:1px solid #1f1f1f;padding:12px 0">
+    <div style="font-weight:600;margin-bottom:4px">{{ p.display }}</div>
+    <div class="text-muted" style="font-family:monospace;font-size:11px">{{ p.name }}</div>
+    <div style="font-size:12px;color:#aaa;margin-top:6px;max-height:60px;overflow:hidden">{{ p.prompt[:120] }}...</div>
+  </div>
+  {% endfor %}
+</div>
+<div class="card">
+  <div class="card-title">Tambah / Edit Personality</div>
+  <form method="POST" action="/personalities/save">
+    <div class="form-group">
+      <label class="form-label">ID (tanpa spasi)</label>
+      <input class="form-control" name="name" placeholder="misal: analyst" required>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Nama Tampilan</label>
+      <input class="form-control" name="display" placeholder="misal: Trading Analyst" required>
+    </div>
+    <div class="form-group">
+      <label class="form-label">System Prompt</label>
+      <textarea class="form-control" name="prompt" rows="6" placeholder="Kamu adalah..." required></textarea>
+    </div>
+    <button class="btn btn-primary" type="submit">Simpan Personality</button>
+  </form>
+</div>
+</div>
+{% endblock %}

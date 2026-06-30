@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}AI Providers{% endblock %}
+{% block content %}
+<div class="card">
+  <div class="card-title">Status Provider</div>
+  <table class="table">
+    <tr><th>Provider</th><th>Status</th><th>Test</th></tr>
+    <tr>
+      <td>🌟 Google Gemini</td>
+      <td>{% if gemini_ok %}<span class="badge badge-green">API Key Set</span>{% else %}<span class="badge badge-red">No Key</span>{% endif %}</td>
+      <td><button class="btn btn-secondary btn-sm" onclick="testProvider('gemini')">Test Ping</button> <span id="r-gemini" class="text-muted"></span></td>
+    </tr>
+    <tr>
+      <td>⚡ Cerebras</td>
+      <td>{% if cerebras_ok %}<span class="badge badge-green">API Key Set</span>{% else %}<span class="badge badge-red">No Key</span>{% endif %}</td>
+      <td><button class="btn btn-secondary btn-sm" onclick="testProvider('cerebras')">Test Ping</button> <span id="r-cerebras" class="text-muted"></span></td>
+    </tr>
+    <tr>
+      <td>🚀 Groq</td>
+      <td>{% if groq_ok %}<span class="badge badge-green">API Key Set</span>{% else %}<span class="badge badge-red">No Key</span>{% endif %}</td>
+      <td><button class="btn btn-secondary btn-sm" onclick="testProvider('groq')">Test Ping</button> <span id="r-groq" class="text-muted"></span></td>
+    </tr>
+  </table>
+</div>
+<div class="card">
+  <div class="card-title">AI Router</div>
+  <p style="font-size:14px;line-height:1.8">
+    AI Router otomatis mencoba provider berurutan:<br>
+    <strong style="color:#25d366">Gemini</strong> → <strong style="color:#f1c40f">Cerebras</strong> → <strong style="color:#e74c3c">Groq</strong><br><br>
+    Jika provider timeout, rate limit, atau quota habis → otomatis pindah ke provider berikutnya.<br>
+    User tidak perlu tahu atau memilih provider.
+  </p>
+  <p style="margin-top:12px"><a href="/settings" class="btn btn-secondary btn-sm">⚙️ Update API Keys di Settings</a></p>
+</div>
+<script>
+function testProvider(p) {
+  const el = document.getElementById('r-' + p);
+  el.textContent = 'Testing...';
+  const fd = new FormData(); fd.append('provider', p);
+  fetch('/providers/test', {method:'POST', body:fd})
+    .then(r=>r.json()).then(d=>{
+      if(d.ok) el.textContent = '✅ ' + d.ms + 'ms';
+      else el.textContent = '❌ ' + d.error;
+    }).catch(e=>{ el.textContent = '❌ Error'; });
+}
+</script>
+{% endblock %}

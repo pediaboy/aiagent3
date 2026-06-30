@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Chat History{% endblock %}
+{% block content %}
+<div style="margin-bottom:12px">
+  <a href="/chats" class="btn btn-secondary btn-sm">← Kembali</a>
+  <a href="/chats/export?context_id={{ context_id }}&session_id={{ session_id }}" class="btn btn-secondary btn-sm">⬇️ Export</a>
+</div>
+<div class="card">
+  <div class="card-title">History: {{ context_id }}</div>
+  {% if history %}
+  {% for msg in history %}
+  <div style="padding:10px;margin:6px 0;border-radius:8px;{% if msg.role=='assistant' %}background:#0d3d25;border-left:3px solid #25d366{% else %}background:#1a1a2e;border-left:3px solid #3498db{% endif %}">
+    <div style="font-size:11px;color:#666;margin-bottom:4px">
+      {{ msg.sender or msg.role }} · {{ msg.ts[:16] if msg.ts else '' }}
+    </div>
+    <div style="font-size:13px;white-space:pre-wrap">{{ msg.content }}</div>
+  </div>
+  {% endfor %}
+  {% else %}
+  <p class="text-muted">Tidak ada history.</p>
+  {% endif %}
+</div>
+{% endblock %}

@@ -1,13 +1,10 @@
 """
-ai.py — AI Router: Gemini → Cerebras → Groq (auto-fallback)
-Full Function Calling + Memory
+ai.py — AI Router v3.0: Gemini → Cerebras → Groq
+Function Calling, Vision, Voice, Personality Manager
 """
-import json
-import logging
-import time
-import requests
+import json, logging, time, base64, requests
+from pathlib import Path
 from typing import Optional
-
 from jarvis.config import (
     GEMINI_API_KEY, GEMINI_MODEL,
     CEREBRAS_API_KEY, CEREBRAS_MODEL,
@@ -22,448 +19,319 @@ logger = logging.getLogger(__name__)
 GEMINI_BASE   = "https://generativelanguage.googleapis.com/v1beta"
 CEREBRAS_BASE = "https://api.cerebras.ai/v1"
 GROQ_BASE     = "https://api.groq.com/openai/v1"
-
 MAX_TOOL_ITER = 5
 
 
-def _build_system_prompt(context_id: str, is_group: bool, group_name: str = None) -> str:
-    base = (
-        "Kamu adalah " + AGENT_NAME + ", AI assistant yang berjalan di HP Android.\n\n"
-        "Kepribadian:\n"
-        "- Ngobrol natural seperti manusia Indonesia, bukan seperti bot\n"
-        "- Bahasa Indonesia santai, boleh campur Inggris kalau wajar\n"
-        "- Proaktif, langsung eksekusi tool tanpa banyak tanya\n"
-        "- Bisa diskusi panjang, coding, debugging, analisis, nulis artikel\n"
-        "- Punya opini, bisa bercanda, tapi tetap helpful\n\n"
-        "Kemampuan:\n"
-        "- Kontrol Android: buka app, screenshot, senter, kamera, dll\n"
-        "- Device: baterai, RAM, storage, CPU, WiFi, Bluetooth\n"
-        "- Alarm, Timer, Reminder\n"
-        "- Musik: putar YouTube\n"
-        "- Web: search, cuaca, kurs, baca artikel\n"
-        "- Memory: simpan dan ingat info penting\n"
-        "- Diskusi: semua topik, coding, writing, brainstorming\n\n"
-        "PENTING:\n"
-        "- Kalau ada request action (buka app, alarm, dll) → langsung pakai tool\n"
-        "- Kalau diskusi/tanya → jawab natural tanpa tool\n"
-        "- JANGAN bilang 'Saya tidak bisa' untuk hal yang ada toolnya\n"
-        "- Respons singkat kalau pesannya singkat, panjang kalau perlu\n"
+def _get_personality_prompt(personality_name: str) -> str:
+    p = mem.get_personality(personality_name)
+    if p:
+        return p["prompt"]
+    return "Kamu adalah AI assistant yang helpful, natural, dan cerdas."
+
+
+def _build_system(context_id, is_group, group_name, session_id, personality_name="default"):
+    pers_prompt = _get_personality_prompt(personality_name)
+    
+    system = (
+        pers_prompt + "\n\n"
+        "Nama kamu: " + AGENT_NAME + "\n"
+        "Kamu berjalan di HP Android via Termux.\n\n"
+        "Aturan:\n"
+        "- Bicara natural, tidak seperti bot\n"
+        "- Bahasa Indonesia santai, boleh mix Inggris\n"
+        "- Kalau ada request action → langsung eksekusi tool tanpa banyak tanya\n"
+        "- Kalau diskusi → jawab natural\n"
+        "- Tidak pernah bilang 'Saya tidak bisa' untuk hal yang ada toolnya\n"
+        "- Variasikan kata pembuka, jangan monoton\n"
+        "- Boleh menggunakan emoji secukupnya\n"
+        "- Jawab singkat kalau pertanyaan singkat, panjang kalau perlu\n"
     )
     
     if is_group:
-        base += (
+        system += (
             "\nKamu ada di grup WhatsApp '" + (group_name or "Grup") + "'.\n"
             "- Ikut diskusi seperti anggota grup biasa\n"
-            "- Pahami konteks percakapan dari semua anggota\n"
-            "- Balas natural, bukan seperti bot menjawab pertanyaan\n"
-            "- Bisa nimbrung kalau relevan\n"
+            "- Pahami konteks dari semua member\n"
+            "- Balas natural, tahu siapa yang bicara\n"
         )
     
-    # Inject long-term memory
-    facts = mem.get_facts_text(context_id)
+    facts = mem.get_facts_text(context_id, session_id)
     if facts:
-        base += "\n\n" + facts
+        system += "\n\n" + facts
     
-    return base
+    return system
 
 
-# ─── Provider: Gemini ─────────────────────────────────────────────────────────
+# ─── Gemini ───────────────────────────────────────────────────────────────────
 
-def _call_gemini(messages: list, system: str, tools: list = None) -> dict:
+def _call_gemini(messages, system, tools=None, image_data=None, image_mime=None):
     if not GEMINI_API_KEY:
         return {"error": "no_key"}
     
     url = f"{GEMINI_BASE}/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
     
-    # Convert OpenAI-style messages to Gemini format
     contents = []
-    for m in messages:
+    for i, m in enumerate(messages):
         role = "user" if m["role"] == "user" else "model"
-        contents.append({
-            "role": role,
-            "parts": [{"text": m["content"]}]
-        })
+        # Inject gambar ke pesan user terakhir
+        if role == "user" and i == len(messages)-1 and image_data:
+            parts = [
+                {"inline_data": {"mime_type": image_mime or "image/jpeg", "data": image_data}},
+                {"text": m["content"]}
+            ]
+        else:
+            parts = [{"text": m["content"]}]
+        contents.append({"role": role, "parts": parts})
     
     payload = {
         "system_instruction": {"parts": [{"text": system}]},
         "contents": contents,
-        "generationConfig": {
-            "temperature": 0.8,
-            "maxOutputTokens": 1500,
-        }
+        "generationConfig": {"temperature": 0.85, "maxOutputTokens": 2000}
     }
-    
     if tools:
         payload["tools"] = [{"function_declarations": tools}]
         payload["tool_config"] = {"function_calling_config": {"mode": "AUTO"}}
     
     try:
         r = requests.post(url, json=payload, timeout=AI_TIMEOUT)
-        if r.status_code == 429:
-            return {"error": "rate_limit"}
-        if r.status_code == 403:
-            return {"error": "quota_exceeded"}
+        if r.status_code == 429: return {"error": "rate_limit"}
+        if r.status_code in (403, 402): return {"error": "quota_exceeded"}
         r.raise_for_status()
         data = r.json()
         
-        candidates = data.get("candidates", [])
-        if not candidates:
-            return {"error": "no_candidates"}
+        cands = data.get("candidates", [])
+        if not cands: return {"error": "no_candidates"}
         
-        parts = candidates[0].get("content", {}).get("parts", [])
-        
-        # Cek function calls
-        func_calls = []
-        text_parts = []
+        parts = cands[0].get("content", {}).get("parts", [])
+        func_calls, texts = [], []
         for p in parts:
             if "functionCall" in p:
-                func_calls.append({
-                    "name": p["functionCall"]["name"],
-                    "args": p["functionCall"].get("args", {})
-                })
+                func_calls.append({"name": p["functionCall"]["name"], "args": p["functionCall"].get("args", {})})
             elif "text" in p:
-                text_parts.append(p["text"])
+                texts.append(p["text"])
         
         return {
-            "text": "".join(text_parts).strip(),
+            "text": "".join(texts).strip(),
             "tool_calls": func_calls,
             "provider": "gemini",
             "model": GEMINI_MODEL,
-            "raw_content": candidates[0].get("content", {})
+            "raw_content": cands[0].get("content", {}),
         }
-        
     except requests.Timeout:
         return {"error": "timeout"}
-    except requests.RequestException as e:
-        return {"error": str(e)}
-
-
-def _gemini_tool_response(contents: list, tool_results: list) -> dict:
-    """Kirim tool results ke Gemini untuk dapat final response."""
-    if not GEMINI_API_KEY:
-        return {"error": "no_key"}
-    
-    url = f"{GEMINI_BASE}/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
-    
-    func_parts = [
-        {
-            "functionResponse": {
-                "name": tr["name"],
-                "response": {"result": tr["result"]}
-            }
-        }
-        for tr in tool_results
-    ]
-    
-    new_contents = list(contents) + [{"role": "user", "parts": func_parts}]
-    
-    payload = {
-        "contents": new_contents,
-        "generationConfig": {
-            "temperature": 0.8,
-            "maxOutputTokens": 1500,
-        }
-    }
-    
-    try:
-        r = requests.post(url, json=payload, timeout=AI_TIMEOUT)
-        r.raise_for_status()
-        data = r.json()
-        candidates = data.get("candidates", [])
-        if not candidates:
-            return {"error": "no_candidates"}
-        parts = candidates[0].get("content", {}).get("parts", [])
-        text = "".join(p.get("text", "") for p in parts if "text" in p).strip()
-        return {
-            "text": text,
-            "tool_calls": [],
-            "provider": "gemini",
-            "model": GEMINI_MODEL,
-        }
     except Exception as e:
         return {"error": str(e)}
 
 
-# ─── Provider: Cerebras / Groq (OpenAI-compatible) ───────────────────────────
-
-def _call_openai_compat(
-    messages: list,
-    system: str,
-    api_key: str,
-    model: str,
-    base_url: str,
-    provider_name: str,
-    tools: list = None,
-) -> dict:
-    if not api_key:
-        return {"error": "no_key"}
+def _call_openai_compat(messages, system, api_key, model, base_url, provider_name):
+    if not api_key: return {"error": "no_key"}
     
-    url = base_url + "/chat/completions"
-    headers = {
-        "Authorization": "Bearer " + api_key,
-        "Content-Type": "application/json",
-    }
-    
-    all_messages = [{"role": "system", "content": system}] + messages
-    
-    # Convert Gemini tool declarations to OpenAI format
-    oai_tools = None
-    if tools:
-        oai_tools = [
-            {
-                "type": "function",
-                "function": {
-                    "name": t["name"],
-                    "description": t["description"],
-                    "parameters": t["parameters"],
-                }
-            }
-            for t in tools
-        ]
-    
-    payload = {
-        "model": model,
-        "messages": all_messages,
-        "temperature": 0.8,
-        "max_tokens": 1500,
-    }
-    if oai_tools:
-        payload["tools"] = oai_tools
-        payload["tool_choice"] = "auto"
+    headers = {"Authorization": "Bearer " + api_key, "Content-Type": "application/json"}
+    all_msgs = [{"role": "system", "content": system}] + messages
+    payload  = {"model": model, "messages": all_msgs, "temperature": 0.85, "max_tokens": 2000}
     
     try:
-        r = requests.post(url, json=payload, headers=headers, timeout=AI_TIMEOUT)
-        if r.status_code in (429, 503):
-            return {"error": "rate_limit"}
-        if r.status_code == 402:
-            return {"error": "quota_exceeded"}
+        r = requests.post(base_url + "/chat/completions", json=payload, headers=headers, timeout=AI_TIMEOUT)
+        if r.status_code in (429, 503): return {"error": "rate_limit"}
+        if r.status_code == 402: return {"error": "quota_exceeded"}
         r.raise_for_status()
-        data = r.json()
-        
+        data   = r.json()
         choice = data.get("choices", [{}])[0]
-        msg    = choice.get("message", {})
-        text   = msg.get("content", "") or ""
-        
-        # Tool calls
-        func_calls = []
-        for tc in (msg.get("tool_calls") or []):
-            fn = tc.get("function", {})
-            try:
-                args = json.loads(fn.get("arguments", "{}"))
-            except:
-                args = {}
-            func_calls.append({
-                "name": fn.get("name", ""),
-                "args": args
-            })
-        
-        return {
-            "text": text.strip(),
-            "tool_calls": func_calls,
-            "provider": provider_name,
-            "model": model,
-        }
-        
+        text   = choice.get("message", {}).get("content", "") or ""
+        return {"text": text.strip(), "tool_calls": [], "provider": provider_name, "model": model}
     except requests.Timeout:
         return {"error": "timeout"}
-    except requests.RequestException as e:
+    except Exception as e:
         return {"error": str(e)}
 
 
-# ─── AI Router ────────────────────────────────────────────────────────────────
-
-PROVIDERS = [
-    {
-        "name": "gemini",
-        "call": lambda msgs, sys, tools: _call_gemini(msgs, sys, tools),
-    },
-    {
-        "name": "cerebras",
-        "call": lambda msgs, sys, tools: _call_openai_compat(
-            msgs, sys, CEREBRAS_API_KEY, CEREBRAS_MODEL, CEREBRAS_BASE, "cerebras", tools
-        ),
-    },
-    {
-        "name": "groq",
-        "call": lambda msgs, sys, tools: _call_openai_compat(
-            msgs, sys, GROQ_API_KEY, GROQ_MODEL, GROQ_BASE, "groq", tools
-        ),
-    },
-]
-
-FATAL_ERRORS = {"no_key"}
-RETRY_ERRORS = {"rate_limit", "quota_exceeded", "timeout"}
+def _route_fallback(messages, system):
+    """Fallback: Cerebras → Groq (tanpa tool calling)."""
+    providers = [
+        ("cerebras", lambda: _call_openai_compat(messages, system, CEREBRAS_API_KEY, CEREBRAS_MODEL, CEREBRAS_BASE, "cerebras")),
+        ("groq",     lambda: _call_openai_compat(messages, system, GROQ_API_KEY, GROQ_MODEL, GROQ_BASE, "groq")),
+    ]
+    for name, fn in providers:
+        res = fn()
+        if "error" not in res:
+            return res, name, True
+    return {"text": "Maaf, semua AI provider tidak tersedia saat ini.", "tool_calls": []}, "none", True
 
 
-def _route(messages: list, system: str, tools: list = None) -> tuple:
-    """
-    Coba provider berurutan: Gemini → Cerebras → Groq.
-    Return: (result_dict, provider_name, retry_count, fallback_used)
-    """
-    retry_count   = 0
-    fallback_used = False
+# ─── Transcription ────────────────────────────────────────────────────────────
+
+def transcribe_audio(file_path: str) -> str:
+    """Transkripsi audio via Groq Whisper atau fallback."""
+    if GROQ_API_KEY:
+        try:
+            with open(file_path, "rb") as f:
+                headers = {"Authorization": "Bearer " + GROQ_API_KEY}
+                files   = {"file": (Path(file_path).name, f, "audio/ogg")}
+                data    = {"model": "whisper-large-v3"}
+                r = requests.post(GROQ_BASE + "/audio/transcriptions",
+                                  headers=headers, files=files, data=data, timeout=30)
+                r.raise_for_status()
+                return r.json().get("text", "").strip()
+        except Exception as e:
+            logger.error("Groq transcribe: %s", e)
     
-    for i, provider in enumerate(PROVIDERS):
-        if i > 0:
-            fallback_used = True
-        
-        # Skip jika tidak ada API key
-        result = provider["call"](messages, system, tools)
-        
-        if "error" not in result:
-            return result, provider["name"], retry_count, fallback_used
-        
-        err = result["error"]
-        if err == "no_key":
-            continue  # Skip provider ini
-        
-        logger.warning("[AI Router] %s error: %s → fallback", provider["name"], err)
-        retry_count += 1
+    # Fallback: Gemini audio understanding
+    if GEMINI_API_KEY:
+        try:
+            with open(file_path, "rb") as f:
+                audio_b64 = base64.b64encode(f.read()).decode()
+            url = f"{GEMINI_BASE}/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+            payload = {"contents": [{"role":"user","parts":[
+                {"inline_data":{"mime_type":"audio/ogg","data":audio_b64}},
+                {"text":"Transkripsi audio ini ke teks bahasa Indonesia."}
+            ]}]}
+            r = requests.post(url, json=payload, timeout=30)
+            r.raise_for_status()
+            cands = r.json().get("candidates",[])
+            if cands:
+                parts = cands[0].get("content",{}).get("parts",[])
+                return "".join(p.get("text","") for p in parts).strip()
+        except Exception as e:
+            logger.error("Gemini transcribe: %s", e)
     
-    return {"error": "all_providers_failed", "text": "Maaf, semua AI provider sedang tidak tersedia."}, "none", retry_count, fallback_used
+    return "[Tidak bisa mentranskrip audio]"
 
 
-# ─── Main chat function ───────────────────────────────────────────────────────
+def analyze_image(file_path: str, user_question: str = "") -> str:
+    """Analisis gambar via Gemini Vision."""
+    if not GEMINI_API_KEY:
+        return "[Vision tidak tersedia — isi GEMINI_API_KEY]"
+    try:
+        with open(file_path, "rb") as f:
+            img_b64 = base64.b64encode(f.read()).decode()
+        mime = "image/jpeg"
+        if file_path.lower().endswith(".png"):  mime = "image/png"
+        elif file_path.lower().endswith(".gif"): mime = "image/gif"
+        elif file_path.lower().endswith(".webp"):mime = "image/webp"
+        
+        question = user_question or "Jelaskan isi gambar ini secara detail dalam bahasa Indonesia."
+        url = f"{GEMINI_BASE}/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+        payload = {"contents":[{"role":"user","parts":[
+            {"inline_data":{"mime_type":mime,"data":img_b64}},
+            {"text": question}
+        ]}]}
+        r = requests.post(url, json=payload, timeout=30)
+        r.raise_for_status()
+        cands = r.json().get("candidates",[])
+        if cands:
+            parts = cands[0].get("content",{}).get("parts",[])
+            return "".join(p.get("text","") for p in parts).strip()
+    except Exception as e:
+        logger.error("analyze_image: %s", e)
+    return "[Gagal menganalisis gambar]"
 
-def chat(
-    context_id: str,
-    user_message: str,
-    sender_phone: str = "",
-    sender_name: str = "",
-    is_group: bool = False,
-    group_name: str = None,
-) -> str:
+
+# ─── Main chat ────────────────────────────────────────────────────────────────
+
+def chat(context_id, user_message, sender_phone="", sender_name="",
+         is_group=False, group_name=None, session_id="default",
+         image_data=None, image_mime=None, personality_name="default"):
+    
     t_start = time.time()
+    mem.add_message(context_id, "user", user_message, sender=sender_name if is_group else None, session_id=session_id)
+    mem.upsert_user(sender_phone, sender_name, session_id=session_id)
     
-    # Simpan pesan user
-    mem.add_message(context_id, "user", user_message, sender=sender_name if is_group else None)
-    mem.upsert_user(sender_phone, sender_name)
-    
-    # Build system prompt
-    system = _build_system_prompt(context_id, is_group, group_name)
-    
-    # Build message history
-    history = mem.get_history(context_id)
-    # Convert ke format provider-agnostic
+    system   = _build_system(context_id, is_group, group_name, session_id, personality_name)
+    history  = mem.get_history(context_id, session_id)
     messages = [{"role": h["role"], "content": h["content"]} for h in history]
     
-    # ── Gemini dengan Function Calling ────────────────────────────────────────
-    # Coba Gemini dulu dengan tool calling, karena paling powerful
-    final_text   = None
+    final_text    = None
     provider_used = None
-    retry_count  = 0
+    retry_count   = 0
     fallback_used = False
-    error_msg    = None
+    error_msg     = None
     
-    # Coba function calling dengan Gemini
+    # ── Gemini dengan Function Calling ────────────────────────────────────────
     if GEMINI_API_KEY:
-        gemini_contents = [
-            {"role": "user" if m["role"] == "user" else "model",
-             "parts": [{"text": m["content"]}]}
-            for m in messages
-        ]
-        
-        for iteration in range(MAX_TOOL_ITER):
-            result = _call_gemini(messages, system, TOOL_DECLARATIONS)
-            
-            if "error" in result:
-                break  # Fallback ke router tanpa tools
-            
-            tool_calls = result.get("tool_calls", [])
-            
-            if not tool_calls:
-                final_text    = result.get("text", "")
+        # Kalau ada gambar, gunakan model vision tanpa tools dulu
+        if image_data:
+            res = _call_gemini(messages, system, tools=None, image_data=image_data, image_mime=image_mime)
+            if "error" not in res:
+                final_text    = res.get("text", "")
                 provider_used = "gemini"
-                break
-            
-            # Eksekusi tools
-            tool_results_for_gemini = []
-            for tc in tool_calls:
-                t_result = execute_tool(tc["name"], tc["args"], context_id)
-                mem.log_tool(context_id, tc["name"], tc["args"], t_result)
-                tool_results_for_gemini.append({
-                    "name": tc["name"],
-                    "result": t_result
-                })
-                logger.info("[TOOL] %s → %s", tc["name"], str(t_result)[:80])
-            
-            # Kirim tool results kembali ke Gemini
-            # Update contents untuk iterasi berikutnya
-            gemini_contents.append(result["raw_content"])
-            
-            func_parts = [
-                {"functionResponse": {"name": tr["name"], "response": {"result": tr["result"]}}}
-                for tr in tool_results_for_gemini
+        
+        if not final_text:
+            # Gemini dengan tool calling
+            gemini_contents = [
+                {"role": "user" if m["role"]=="user" else "model", "parts":[{"text":m["content"]}]}
+                for m in messages
             ]
-            gemini_contents.append({"role": "user", "parts": func_parts})
             
-            # Call Gemini lagi dengan updated contents (tanpa tools agar dapat text)
-            url = f"{GEMINI_BASE}/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
-            payload = {
-                "system_instruction": {"parts": [{"text": system}]},
-                "contents": gemini_contents,
-                "generationConfig": {"temperature": 0.8, "maxOutputTokens": 1500}
-            }
-            try:
-                r = requests.post(url, json=payload, timeout=AI_TIMEOUT)
-                r.raise_for_status()
-                data = r.json()
-                cands = data.get("candidates", [])
-                if cands:
-                    parts = cands[0].get("content", {}).get("parts", [])
-                    raw_content = cands[0].get("content", {})
-                    text_parts = [p.get("text", "") for p in parts if "text" in p]
-                    new_func_calls = [p for p in parts if "functionCall" in p]
-                    
-                    if new_func_calls:
-                        # Ada lagi function calls — loop
-                        result["raw_content"] = raw_content
-                        result["tool_calls"] = [
-                            {"name": p["functionCall"]["name"], "args": p["functionCall"].get("args", {})}
-                            for p in new_func_calls
-                        ]
-                        continue
-                    
-                    final_text    = "".join(text_parts).strip()
+            for iteration in range(MAX_TOOL_ITER):
+                res = _call_gemini(messages, system, TOOL_DECLARATIONS)
+                if "error" in res:
+                    error_msg = res["error"]
+                    break
+                
+                tool_calls = res.get("tool_calls", [])
+                if not tool_calls:
+                    final_text    = res.get("text", "")
                     provider_used = "gemini"
                     break
-            except Exception as e:
-                logger.error("Gemini tool-result call: %s", e)
-                break
+                
+                # Eksekusi tools
+                func_resp_parts = []
+                for tc in tool_calls:
+                    t_result = execute_tool(tc["name"], tc["args"], context_id, session_id)
+                    mem.log_tool(context_id, tc["name"], tc["args"], t_result, session_id)
+                    logger.info("[TOOL] %s → %s", tc["name"], str(t_result)[:60])
+                    func_resp_parts.append({"functionResponse":{"name":tc["name"],"response":{"result":t_result}}})
+                
+                # Update contents dan call lagi
+                gemini_contents.append(res["raw_content"])
+                gemini_contents.append({"role":"user","parts":func_resp_parts})
+                
+                url = f"{GEMINI_BASE}/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
+                payload = {
+                    "system_instruction":{"parts":[{"text":system}]},
+                    "contents": gemini_contents,
+                    "generationConfig":{"temperature":0.85,"maxOutputTokens":2000}
+                }
+                try:
+                    r = requests.post(url, json=payload, timeout=AI_TIMEOUT)
+                    r.raise_for_status()
+                    data2  = r.json()
+                    cands2 = data2.get("candidates",[])
+                    if cands2:
+                        parts2 = cands2[0].get("content",{}).get("parts",[])
+                        new_fc = [p for p in parts2 if "functionCall" in p]
+                        if new_fc:
+                            res["raw_content"] = cands2[0].get("content",{})
+                            res["tool_calls"]  = [{"name":p["functionCall"]["name"],"args":p["functionCall"].get("args",{})} for p in new_fc]
+                            continue
+                        final_text    = "".join(p.get("text","") for p in parts2 if "text" in p).strip()
+                        provider_used = "gemini"
+                        break
+                except Exception as e:
+                    logger.error("Gemini post-tool: %s", e)
+                    break
     
-    # Fallback ke router (Cerebras / Groq) tanpa tool calling
+    # ── Fallback ──────────────────────────────────────────────────────────────
     if not final_text:
-        result, provider_used, retry_count, fallback_used = _route(messages, system, tools=None)
-        if "error" in result and result.get("text"):
-            final_text = result["text"]
-            error_msg  = result.get("error")
-        else:
-            final_text = result.get("text") or "Maaf, tidak ada respons."
+        res, provider_used, fallback_used = _route_fallback(messages, system)
+        final_text = res.get("text") or "Maaf, tidak ada respons."
+        retry_count += 1
     
     if not final_text:
-        final_text = "Maaf, tidak ada respons dari AI."
+        final_text = "Maaf, ada kendala teknis."
     
-    # Simpan respons ke memory
-    mem.add_message(context_id, "assistant", final_text)
+    mem.add_message(context_id, "assistant", final_text, session_id=session_id)
     
-    # Log
     t_ms = int((time.time() - t_start) * 1000)
     mem.log_ai(
-        context_id=context_id,
-        is_group=is_group,
-        sender_phone=sender_phone,
-        sender_name=sender_name,
-        prompt=user_message,
-        response=final_text,
+        context_id=context_id, is_group=is_group,
+        sender_phone=sender_phone, sender_name=sender_name,
+        prompt=user_message, response=final_text,
         provider=provider_used or "unknown",
-        model=GEMINI_MODEL if provider_used == "gemini" else (CEREBRAS_MODEL if provider_used == "cerebras" else GROQ_MODEL),
-        response_ms=t_ms,
-        retry_count=retry_count,
-        fallback_used=fallback_used,
-        error=error_msg,
+        model=GEMINI_MODEL if provider_used=="gemini" else (CEREBRAS_MODEL if provider_used=="cerebras" else GROQ_MODEL),
+        response_ms=t_ms, retry_count=retry_count,
+        fallback_used=fallback_used, error=error_msg, session_id=session_id,
     )
     
-    logger.info("[AI] %s | %s | %dms | %s chars",
-                provider_used, context_id[:20], t_ms, len(final_text))
-    
+    logger.info("[AI] %s | %s | %dms | provider=%s", context_id[:20], session_id, t_ms, provider_used)
     return final_text
